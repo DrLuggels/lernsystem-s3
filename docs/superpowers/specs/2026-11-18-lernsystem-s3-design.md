@@ -40,7 +40,7 @@ lernsystem-s3/                 öffentliches Repo (GitHub: DrLuggels/lernsystem-
 ### Server
 
 - FastAPI, SQLite in einem Docker-Volume, Frontend als statische Dateien aus derselben App.
-- Deployment nach `new_website.md`: Klon nach `/mnt/.ix-apps/app_mounts/dockge/stacks/`,
+- Deployment nach `new_website.md`: Klon in das dockge-Stack-Verzeichnis,
   `docker compose up -d --build`, nginx-Block für `lernen.luggels.com`, DDNS-Eintrag.
   Der Port wird vor dem Start auf dem Server geprüft.
 - Auth: Browser per Passwort-Login (Session-Cookie), CLI per Bearer-Token. Beide Geheimnisse
