@@ -1,0 +1,7 @@
+dski-sources-3/
+data/
+sessions/
+.env
+.venv/
+__pycache__/
+*.db
