@@ -2,17 +2,24 @@
 """Lokaler Befehl `lernen`: spricht mit der Server-API. Nur Standardbibliothek."""
 
 import argparse
+import base64
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
+import time
+import urllib.parse
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 WURZEL = Path(__file__).resolve().parent.parent
 QUELLE = WURZEL / "dski-sources-3"
+SITZUNGEN = WURZEL / "sessions"
+PROMPTS = WURZEL / "prompts"
+MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".pdf": "application/pdf"}
 
 
 class Fehler(Exception):
@@ -130,6 +137,214 @@ def befehl_status(_: argparse.Namespace) -> None:
         print(f"{fach['name']:<28} {fach['beherrscht']:>3} / {fach['gesamt']:<3} beherrscht  ({prozent} %)")
 
 
+# ---------- Bereich wählen ----------
+
+def bereiche(faecher: list[dict]) -> list[dict]:
+    """Flache Liste aller wählbaren Bereiche: Fächer, Themen und Unterthemen mit aktiven Einträgen."""
+    liste: list[dict] = []
+
+    def themen(fach: dict, knoten: list[dict], tiefe: int) -> None:
+        for t in knoten:
+            if t["aktiv"] and t["gesamt"]:
+                liste.append({"fach": fach["slug"], "thema": t["schluessel"], "tiefe": tiefe,
+                              "name": t["titel"], "gesamt": t["gesamt"], "beherrscht": t["beherrscht"]})
+                themen(fach, t["themen"], tiefe + 1)
+
+    for fach in faecher:
+        if fach["gesamt"]:
+            liste.append({"fach": fach["slug"], "thema": None, "tiefe": 0, "name": fach["name"],
+                          "gesamt": fach["gesamt"], "beherrscht": fach["beherrscht"]})
+            themen(fach, fach["themen"], 1)
+    return liste
+
+
+def bereich_finden(liste: list[dict], suche: str) -> dict:
+    """Findet einen Bereich über Nummer, Fach-Slug, Themen-Schlüssel oder einen Teil des Namens."""
+    if suche.isdigit() and 1 <= int(suche) <= len(liste):
+        return liste[int(suche) - 1]
+    klein = suche.lower()
+    for b in liste:
+        if klein in (b["fach"].lower() if b["thema"] is None else b["thema"].lower()):
+            return b
+    treffer = [b for b in liste if klein in b["name"].lower()
+               or klein in (b["thema"] or b["fach"]).lower()]
+    if not treffer:
+        raise Fehler(f"Kein Fach oder Thema passt zu '{suche}'")
+    if len(treffer) > 1 and len({b["name"].lower() for b in treffer}) > 1:
+        namen = ", ".join(b["name"] for b in treffer[:6])
+        raise Fehler(f"'{suche}' ist mehrdeutig: {namen}")
+    return treffer[0]
+
+
+def bereich_waehlen(suche: str | None) -> dict:
+    liste = bereiche(api("GET", "/api/uebersicht"))
+    if not liste:
+        raise Fehler("Es gibt noch keine aktiven Einträge")
+    if suche:
+        return bereich_finden(liste, suche)
+    for nummer, b in enumerate(liste, 1):
+        print(f"{nummer:>3}  {'  ' * b['tiefe']}{b['name']}  ({b['beherrscht']}/{b['gesamt']})")
+    return bereich_finden(liste, input("\nWas möchtest du lernen? Nummer oder Name: ").strip())
+
+
+# ---------- Quell-Repo und Claude ----------
+
+def quelle_aktualisieren() -> None:
+    ergebnis = subprocess.run(["git", "-C", str(QUELLE), "pull", "--ff-only", "--quiet"],
+                              capture_output=True, text=True)
+    if ergebnis.returncode != 0:
+        print(f"Hinweis: git pull im Quell-Repo fehlgeschlagen: {ergebnis.stderr.strip()}", file=sys.stderr)
+
+
+def quelle_unveraendert() -> None:
+    status = subprocess.run(["git", "-C", str(QUELLE), "status", "--porcelain"],
+                            capture_output=True, text=True, check=True).stdout.strip()
+    if status:
+        raise Fehler("Im Quell-Repo wurden Dateien verändert. Das darf nicht passieren, bitte prüfen:\n" + status)
+
+
+def claude_starten(prompt_datei: str, auftrag: str, werkzeuge: list[str]) -> None:
+    prompt = (PROMPTS / prompt_datei).read_text(encoding="utf-8") + "\n\n## Auftrag\n\n" + auftrag
+    ergebnis = subprocess.run(
+        ["claude", "-p", prompt, "--permission-mode", "acceptEdits", "--allowedTools", *werkzeuge],
+        cwd=WURZEL,
+    )
+    quelle_unveraendert()
+    if ergebnis.returncode != 0:
+        raise Fehler(f"Claude wurde mit Fehler {ergebnis.returncode} beendet")
+
+
+# ---------- Blatt ----------
+
+def blatt_dateien(sitzung: Path, blatt: dict) -> list[tuple[str, Path]]:
+    """Dateien des Blatts als (Name, Pfad). Quellen müssen im Quell-Repo liegen."""
+    dateien = []
+    for d in blatt.get("dateien", []):
+        pfad = (QUELLE / d["quelle"]).resolve()
+        if not pfad.is_relative_to(QUELLE.resolve()) or not pfad.is_file():
+            raise Fehler(f"Datei '{d['quelle']}' liegt nicht im Quell-Repo")
+        dateien.append((d["name"], pfad))
+    if (sitzung / "blatt.pdf").is_file():
+        dateien.append(("blatt.pdf", sitzung / "blatt.pdf"))
+    for name, pfad in dateien:
+        if pfad.suffix.lower() not in MIME:
+            raise Fehler(f"Dateityp von '{name}' wird nicht unterstützt")
+    return dateien
+
+
+def blatt_hochladen(sitzung: Path, bereich: dict) -> int:
+    blatt = json.loads((sitzung / "blatt.json").read_text(encoding="utf-8"))
+    dateien = blatt_dateien(sitzung, blatt)
+    hat_pdf = any(a.get("format") == "pdf" for a in blatt.get("aufgaben", []))
+    if hat_pdf and not (sitzung / "blatt.pdf").is_file():
+        raise Fehler("Das Blatt hat PDF-Aufgaben, aber blatt.pdf fehlt")
+    blatt_id = api("POST", "/api/blaetter", {
+        "titel": blatt["titel"], "fach": bereich["fach"], "thema": bereich["thema"],
+        "quell_commit": quell_commit(QUELLE), "aufgaben": blatt["aufgaben"],
+    })["id"]
+    for name, pfad in dateien:
+        api("POST", f"/api/blaetter/{blatt_id}/dateien", {
+            "name": name, "mime": MIME[pfad.suffix.lower()],
+            "inhalt_base64": base64.b64encode(pfad.read_bytes()).decode(),
+        })
+    return blatt_id
+
+
+def befehl_blatt(args: argparse.Namespace) -> None:
+    quelle_aktualisieren()
+    bereich = bereich_waehlen(" ".join(args.bereich) or None)
+    abfrage = urllib.parse.urlencode(
+        {"thema": bereich["thema"]} if bereich["thema"] else {"fach": bereich["fach"]})
+    eintraege = api("GET", f"/api/eintraege?{abfrage}")
+    if not eintraege:
+        raise Fehler(f"'{bereich['name']}' hat keine aktiven Einträge")
+
+    sitzung = SITZUNGEN / f"neu-{time.strftime('%Y%m%d-%H%M%S')}"
+    (sitzung / ".loesung").mkdir(parents=True)
+    (sitzung / "auftrag.json").write_text(json.dumps({
+        "bereich": bereich["name"], "fach": bereich["fach"], "anzahl": args.anzahl, "eintraege": eintraege,
+    }, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    relativ = sitzung.relative_to(WURZEL)
+    print(f"Erzeuge Blatt zu „{bereich['name']}“ ({len(eintraege)} Einträge zur Auswahl) …")
+    claude_starten("AUFGABEN.md", f"Sitzungsordner: `{relativ}`",
+                   ["Read", "Glob", "Grep", "Write", "Edit", "Agent", "Bash(pdflatex:*)"])
+    if not (sitzung / "blatt.json").is_file():
+        raise Fehler(f"Claude hat kein blatt.json geschrieben (siehe {relativ})")
+
+    blatt_id = blatt_hochladen(sitzung, bereich)
+    ziel = SITZUNGEN / f"blatt-{blatt_id}"
+    sitzung.rename(ziel)
+    url, _ = konfiguration()
+    print(f"\nBlatt {blatt_id} liegt bereit: {url}/#/blatt/{blatt_id}")
+    if (ziel / "blatt.pdf").is_file():
+        (ziel / "abgabe").mkdir(exist_ok=True)
+        print(f"PDF-Teil: {ziel / 'blatt.pdf'}\n"
+              f"  In Xournal++ ausfüllen und als {ziel / 'abgabe' / 'blatt.xopp'} speichern.")
+        if shutil.which("xournalpp") and not args.still:
+            subprocess.Popen(["xournalpp", str(ziel / "blatt.pdf")],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+# ---------- Korrektur ----------
+
+def abgabe_exportieren(sitzung: Path) -> None:
+    """Xournal++-Datei nach PDF exportieren, falls vorhanden."""
+    xopp = sitzung / "abgabe" / "blatt.xopp"
+    if xopp.is_file() and shutil.which("xournalpp"):
+        subprocess.run(["xournalpp", str(xopp), "-p", str(sitzung / "abgabe" / "ausgefuellt.pdf")],
+                       check=True, capture_output=True)
+
+
+def befehl_korrigieren(args: argparse.Namespace) -> None:
+    if args.blatt is None:
+        wartend = [b for b in api("GET", "/api/blaetter") if b["status"] == "abgegeben"]
+        if not wartend:
+            raise Fehler("Kein abgegebenes Blatt gefunden. Erst auf der Seite „Blatt abgeben“ klicken.")
+        blatt_id = wartend[-1]["id"]          # das älteste zuerst
+    else:
+        blatt_id = args.blatt
+    blatt = api("GET", f"/api/blaetter/{blatt_id}")
+    if blatt["status"] != "abgegeben":
+        raise Fehler(f"Blatt {blatt_id} ist {blatt['status']}, nicht abgegeben")
+
+    sitzung = SITZUNGEN / f"blatt-{blatt_id}"
+    sitzung.mkdir(parents=True, exist_ok=True)
+    abgabe_exportieren(sitzung)
+    hat_pdf = any(a["format"] == "pdf" for a in blatt["aufgaben"])
+    if hat_pdf and not (sitzung / "abgabe" / "ausgefuellt.pdf").is_file():
+        print("Hinweis: Das Blatt hat PDF-Aufgaben, aber es liegt keine handschriftliche Abgabe vor "
+              f"({sitzung / 'abgabe' / 'blatt.xopp'}). Diese Aufgaben werden mit 0 bewertet.")
+        if not args.ja and input("Trotzdem korrigieren? [j/N] ").strip().lower() != "j":
+            raise Fehler("Abgebrochen")
+    (sitzung / "abgabe.json").write_text(json.dumps(blatt, ensure_ascii=False, indent=1), encoding="utf-8")
+    (sitzung / "korrektur.json").unlink(missing_ok=True)
+
+    relativ = sitzung.relative_to(WURZEL)
+    print(f"Korrigiere Blatt {blatt_id} „{blatt['titel']}“ …")
+    claude_starten("KORREKTUR.md", f"Sitzungsordner: `{relativ}`", ["Read", "Glob", "Grep", "Write"])
+    if not (sitzung / "korrektur.json").is_file():
+        raise Fehler(f"Claude hat kein korrektur.json geschrieben (siehe {relativ})")
+
+    korrektur = json.loads((sitzung / "korrektur.json").read_text(encoding="utf-8"))
+    ergebnis = api("POST", f"/api/blaetter/{blatt_id}/korrektur", {"aufgaben": korrektur["aufgaben"]})
+    print()
+    for a in ergebnis["aenderungen"]:
+        pfeil = (f"Level {a['level_vorher']} → {a['level_nachher']}" if a["level_nachher"] > a["level_vorher"]
+                 else f"bleibt Level {a['level_nachher']}")
+        print(f"  {pfeil:<16} Claude {a['claude_wert']:>3} %  Ich {a['user_wert']:>3} %  {a['titel']}")
+    url, _ = konfiguration()
+    print(f"\nKorrektur: {url}/#/blatt/{blatt_id}")
+
+
+# ---------- Deaktivieren ----------
+
+def befehl_aktiv(args: argparse.Namespace) -> None:
+    tabelle = "themen" if args.thema else "eintraege"
+    api("PATCH", f"/api/{tabelle}/{args.id}", {"aktiv": args.befehl == "an"})
+    print(f"{'Thema' if args.thema else 'Eintrag'} {args.id} ist jetzt {'aktiv' if args.befehl == 'an' else 'deaktiviert'}.")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lernen", description="Lernsystem S3")
     unter = parser.add_subparsers(dest="befehl", required=True)
@@ -142,6 +357,28 @@ def main(argv: list[str] | None = None) -> int:
 
     unter.add_parser("status", help="Stand je Fach").set_defaults(funktion=befehl_status)
 
+    p_blatt = unter.add_parser("blatt", help="Thema wählen und Übungsblatt erzeugen")
+    p_blatt.add_argument("bereich", nargs="*", help="Fach oder Thema (Name, Teil davon oder Nummer)")
+    p_blatt.add_argument("--anzahl", type=int, default=8, help="Zahl der Aufgaben (Standard: 8)")
+    p_blatt.add_argument("--still", action="store_true", help="Xournal++ nicht öffnen")
+    p_blatt.set_defaults(funktion=befehl_blatt)
+
+    p_korr = unter.add_parser("korrigieren", help="abgegebenes Blatt korrigieren")
+    p_korr.add_argument("blatt", nargs="?", type=int, help="Blatt-Nummer (Standard: ältestes abgegebenes)")
+    p_korr.add_argument("--ja", action="store_true", help="Rückfragen mit Ja beantworten")
+    p_korr.set_defaults(funktion=befehl_korrigieren)
+
+    for name, hilfe in (("aus", "Eintrag oder Thema deaktivieren"), ("an", "Eintrag oder Thema aktivieren")):
+        p_aktiv = unter.add_parser(name, help=hilfe)
+        p_aktiv.add_argument("id", type=int)
+        p_aktiv.add_argument("--thema", action="store_true", help="die Nummer meint ein Thema")
+        p_aktiv.set_defaults(funktion=befehl_aktiv)
+
+    # Ohne Befehl: Blatt erzeugen.
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:
+        argv = ["blatt"]
     args = parser.parse_args(argv)
     try:
         args.funktion(args)

@@ -54,3 +54,54 @@ def test_env_datei_lesen(tmp_path):
     datei.write_text("# Kommentar\nLERN_API_TOKEN=abc\n\nLERN_URL = http://x \n")
     assert lernen.env_datei_lesen(datei) == {"LERN_API_TOKEN": "abc", "LERN_URL": "http://x"}
     assert lernen.env_datei_lesen(tmp_path / "fehlt") == {}
+
+
+FAECHER = [
+    {"slug": "leer", "name": "Leeres Fach", "gesamt": 0, "beherrscht": 0, "themen": []},
+    {"slug": "cloud-computing", "name": "Cloud Computing", "gesamt": 5, "beherrscht": 1, "themen": [
+        {"schluessel": "cloud-computing/topics/docker", "titel": "Docker", "aktiv": True, "gesamt": 5,
+         "beherrscht": 1, "themen": [
+            {"schluessel": "cloud-computing/topics/docker/01-grundlagen", "titel": "Grundlagen", "aktiv": True,
+             "gesamt": 3, "beherrscht": 1, "themen": []},
+            {"schluessel": "cloud-computing/topics/docker/06-docker-networking", "titel": "Docker Networking",
+             "aktiv": True, "gesamt": 2, "beherrscht": 0, "themen": []},
+            {"schluessel": "cloud-computing/topics/docker/07-aus", "titel": "Abgeschaltet", "aktiv": False,
+             "gesamt": 0, "beherrscht": 0, "themen": []},
+        ]},
+    ]},
+]
+
+
+def test_bereiche_ohne_leere_und_deaktivierte():
+    liste = lernen.bereiche(FAECHER)
+    assert [(b["name"], b["tiefe"]) for b in liste] == [
+        ("Cloud Computing", 0), ("Docker", 1), ("Grundlagen", 2), ("Docker Networking", 2)]
+    assert liste[0]["thema"] is None and liste[1]["thema"] == "cloud-computing/topics/docker"
+
+
+def test_bereich_finden():
+    liste = lernen.bereiche(FAECHER)
+    assert lernen.bereich_finden(liste, "3")["name"] == "Grundlagen"
+    assert lernen.bereich_finden(liste, "cloud")["thema"] is None
+    assert lernen.bereich_finden(liste, "networking")["name"] == "Docker Networking"
+    assert lernen.bereich_finden(liste, "Grundlagen")["name"] == "Grundlagen"
+    with pytest.raises(lernen.Fehler, match="Kein Fach"):
+        lernen.bereich_finden(liste, "quantenphysik")
+
+
+def test_blatt_dateien_nur_aus_dem_quell_repo(tmp_path, monkeypatch):
+    quelle = tmp_path / "quelle"
+    (quelle / "cc").mkdir(parents=True)
+    (quelle / "cc" / "bild.png").write_bytes(b"x")
+    (tmp_path / "geheim.png").write_bytes(b"x")
+    sitzung = tmp_path / "sitzung"
+    sitzung.mkdir()
+    (sitzung / "blatt.pdf").write_bytes(b"%PDF")
+    monkeypatch.setattr(lernen, "QUELLE", quelle)
+
+    dateien = lernen.blatt_dateien(sitzung, {"dateien": [{"name": "bild-1.png", "quelle": "cc/bild.png"}]})
+    assert [name for name, _ in dateien] == ["bild-1.png", "blatt.pdf"]
+    with pytest.raises(lernen.Fehler, match="nicht im Quell-Repo"):
+        lernen.blatt_dateien(sitzung, {"dateien": [{"name": "x.png", "quelle": "../geheim.png"}]})
+    with pytest.raises(lernen.Fehler, match="nicht im Quell-Repo"):
+        lernen.blatt_dateien(sitzung, {"dateien": [{"name": "x.png", "quelle": "cc/fehlt.png"}]})
