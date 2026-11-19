@@ -151,4 +151,9 @@ $("abmelden").addEventListener("click", async () => {
   zeigeAnmeldung();
 });
 
-laden().catch(() => {});
+laden().catch((fehler) => {
+  // 401 zeigt bereits die Anmeldung; alles andere (z. B. Server nicht erreichbar) als Meldung.
+  if (!$("anmeldung").hidden) return;
+  $("app").hidden = false;
+  $("meldung").textContent = `Stand konnte nicht geladen werden: ${fehler.message}`;
+});
