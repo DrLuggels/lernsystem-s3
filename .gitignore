@@ -5,3 +5,4 @@ sessions/
 .venv/
 __pycache__/
 *.db
+extraktion/
