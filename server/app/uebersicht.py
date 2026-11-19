@@ -21,7 +21,7 @@ def baum(conn: sqlite3.Connection) -> list[dict]:
         eintraege_je_thema.setdefault(eintrag.pop("thema_id"), []).append(eintrag)
 
     kinder: dict[tuple[int, int | None], list[sqlite3.Row]] = {}
-    for z in conn.execute("SELECT id, fach_id, parent_id, titel, aktiv FROM themen ORDER BY reihenfolge, id"):
+    for z in conn.execute("SELECT id, fach_id, parent_id, schluessel, titel, aktiv FROM themen ORDER BY reihenfolge, id"):
         kinder.setdefault((z["fach_id"], z["parent_id"]), []).append(z)
 
     def knoten(zeile: sqlite3.Row) -> tuple[dict, int, int, int]:
@@ -39,6 +39,7 @@ def baum(conn: sqlite3.Connection) -> list[dict]:
             gesamt = beherrscht = summe = 0
         thema = {
             "id": zeile["id"],
+            "schluessel": zeile["schluessel"],
             "titel": zeile["titel"],
             "aktiv": bool(zeile["aktiv"]),
             **_zaehler(gesamt, beherrscht, summe),

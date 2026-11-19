@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS blatt_aufgaben (
     format TEXT NOT NULL CHECK (format IN ('text', 'tabelle', 'code', 'pdf')),
     text TEXT NOT NULL,
     punkte REAL NOT NULL DEFAULT 0,
+    vorgabe TEXT,
     antwort TEXT,
     user_wert INTEGER,
     erreichte_punkte REAL,
