@@ -130,8 +130,16 @@ def test_auswahl_erst_fach_dann_grosses_thema(monkeypatch, capsys):
 
 def test_fach_mit_einem_thema_fragt_nicht_weiter(monkeypatch):
     monkeypatch.setattr(lernen, "api", lambda *a, **k: FAECHER)
-    monkeypatch.setattr("builtins.input", lambda _: "1")
+    monkeypatch.setattr("builtins.input", lambda _: "2")
     assert lernen.bereich_waehlen(None)["name"] == "Cloud Computing"
+
+
+def test_leeres_fach_steht_im_menue_und_erklaert_sich(monkeypatch, capsys):
+    monkeypatch.setattr(lernen, "api", lambda *a, **k: FAECHER)
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    with pytest.raises(lernen.Fehler, match="noch keine Themen"):
+        lernen.bereich_waehlen(None)
+    assert "Leeres Fach  (noch kein Stoff im Quell-Repo)" in capsys.readouterr().out
 
 
 def test_hochladen_nur_einmal(tmp_path, monkeypatch):

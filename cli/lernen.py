@@ -192,14 +192,21 @@ def nummer_waehlen(frage: str, zeilen: list[str], mit_null: str | None = None) -
 
 def bereich_waehlen(suche: str | None) -> dict:
     """Ohne Suchwort: erst das Fach, dann eines seiner großen Themen (oder das ganze Fach)."""
-    liste = bereiche(api("GET", "/api/uebersicht"))
+    uebersicht = api("GET", "/api/uebersicht")
+    liste = bereiche(uebersicht)
     if not liste:
         raise Fehler("Es gibt noch keine aktiven Einträge")
     if suche:
         return bereich_finden(liste, suche)
-    zeile = lambda b: f"{b['name']}  ({b['beherrscht']}/{b['gesamt']} beherrscht)"
-    faecher = [b for b in liste if b["tiefe"] == 0]
+    zeile = lambda b: (f"{b['name']}  ({b['beherrscht']}/{b['gesamt']} beherrscht)" if b["gesamt"]
+                       else f"{b['name']}  (noch kein Stoff im Quell-Repo)")
+    # Alle Fächer anzeigen, auch die ohne Stoff, damit keines zu fehlen scheint.
+    faecher = [{"fach": f["slug"], "thema": None, "tiefe": 0, "name": f["name"],
+                "gesamt": f["gesamt"], "beherrscht": f["beherrscht"]} for f in uebersicht]
     fach = faecher[nummer_waehlen("Welches Fach?", [zeile(b) for b in faecher]) - 1]
+    if not fach["gesamt"]:
+        raise Fehler(f"Zu {fach['name']} gibt es im Quell-Repo noch keine Themen, Aufgaben oder Klausuren "
+                     "(nur die ABOUT.md). Sobald dort Stoff liegt, übernimmt ihn das nächste Update.")
     themen = [b for b in liste if b["tiefe"] == 1 and b["fach"] == fach["fach"]]
     if len(themen) < 2:
         return fach
