@@ -1,12 +1,16 @@
 import sqlite3
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import auth, db, importer, uebersicht
 from .config import Settings
+
+FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
 
 def get_db(request: Request) -> Iterator[sqlite3.Connection]:
@@ -95,5 +99,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.patch("/api/themen/{id_}", dependencies=[Depends(auth.angemeldet)])
     def thema_aktiv(id_: int, daten: AktivIn, conn: sqlite3.Connection = Depends(get_db)):
         return _aktiv_setzen(conn, "themen", id_, daten.aktiv)
+
+    # Zuletzt, damit die API-Routen Vorrang haben.
+    if FRONTEND.is_dir():
+        app.mount("/", StaticFiles(directory=FRONTEND, html=True), name="frontend")
 
     return app
