@@ -239,7 +239,8 @@ def claude_starten(prompt_datei: str, auftrag: str, werkzeuge: list[str], live: 
     prompt = (PROMPTS / prompt_datei).read_text(encoding="utf-8") + "\n\n## Auftrag\n\n" + auftrag
     befehl = ["claude", prompt] if live else ["claude", "-p", prompt]
     ergebnis = subprocess.run(
-        [*befehl, "--permission-mode", "acceptEdits", "--allowedTools", *werkzeuge], cwd=WURZEL)
+        [*befehl, "--permission-mode", "auto" if live else "acceptEdits",
+         "--allowedTools", *werkzeuge], cwd=WURZEL)
     quelle_unveraendert()
     if ergebnis.returncode != 0 and not live:
         raise Fehler(f"Claude wurde mit Fehler {ergebnis.returncode} beendet")
