@@ -32,9 +32,14 @@
         <span id="gesamt-beherrscht" class="zahl">0</span>
         <span class="kopf__von">von <span id="gesamt-anzahl">0</span> beherrscht</span>
       </div>
+      <nav class="reiter" aria-label="Bereiche">
+        <a href="#/" data-ansicht="uebersicht">Übersicht</a>
+        <a href="#/blaetter" data-ansicht="blaetter">Blätter</a>
+      </nav>
       <button id="abmelden" class="leise" type="button">Abmelden</button>
     </header>
 
+    <div id="ansicht-uebersicht" class="ansicht">
     <section class="legende" aria-label="Level">
       <span><i class="pips" data-level="1"></i>50 %</span>
       <span><i class="pips" data-level="2"></i>65 %</span>
@@ -44,9 +49,21 @@
     </section>
 
     <section id="faecher" class="faecher" aria-label="Fächer"></section>
+    </div>
+
+    <section id="ansicht-blaetter" class="ansicht" aria-label="Blätter" hidden>
+      <div id="blatt-liste" class="blattliste"></div>
+    </section>
+
+    <section id="ansicht-blatt" class="ansicht" aria-label="Blatt" hidden>
+      <div id="blatt-inhalt"></div>
+    </section>
+
     <p id="meldung" class="fehler" role="alert"></p>
   </div>
 
   <script src="app.js" defer></script>
+  <script src="markdown.js" defer></script>
+  <script src="blaetter.js" defer></script>
 </body>
 </html>

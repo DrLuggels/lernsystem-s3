@@ -119,13 +119,39 @@ function fach(f, index) {
   return karte;
 }
 
-async function laden() {
+async function kopfzahlen() {
   const faecher = await api("GET", "/api/uebersicht");
-  $("anmeldung").hidden = true;
-  $("app").hidden = false;
   $("gesamt-beherrscht").textContent = faecher.reduce((summe, f) => summe + f.beherrscht, 0);
   $("gesamt-anzahl").textContent = faecher.reduce((summe, f) => summe + f.gesamt, 0);
-  $("faecher").replaceChildren(...faecher.map(fach));
+  return faecher;
+}
+
+async function zeigeUebersicht() {
+  $("faecher").replaceChildren(...(await kopfzahlen()).map(fach));
+}
+
+/** Zeigt die Ansicht zur Adresse: #/ , #/blaetter , #/blatt/<id> */
+async function laden() {
+  const [, name = "", id] = location.hash.split("/");
+  const ansicht = name === "blatt" ? "blatt" : name === "blaetter" ? "blaetter" : "uebersicht";
+  $("meldung").textContent = "";
+  try {
+    if (ansicht === "uebersicht") await zeigeUebersicht();
+    else await Promise.all([kopfzahlen(), ansicht === "blatt" ? zeigeBlatt(Number(id)) : zeigeBlaetter()]);
+  } catch (fehler) {
+    if (!$("anmeldung").hidden) return;       // 401: die Anmeldung ist schon sichtbar
+    $("meldung").textContent = fehler.message;
+  }
+  if (!$("anmeldung").hidden && $("app").hidden) return;
+  $("anmeldung").hidden = true;
+  $("app").hidden = false;
+  for (const bereich of ["uebersicht", "blaetter", "blatt"]) {
+    $(`ansicht-${bereich}`).hidden = bereich !== ansicht;
+  }
+  for (const reiter of document.querySelectorAll(".reiter a")) {
+    const aktiv = reiter.dataset.ansicht === (ansicht === "blatt" ? "blaetter" : ansicht);
+    reiter.toggleAttribute("aria-current", aktiv);
+  }
 }
 
 function zeigeAnmeldung() {
@@ -140,6 +166,7 @@ $("login-form").addEventListener("submit", async (ereignis) => {
   try {
     await api("POST", "/api/login", { passwort: $("passwort").value });
     $("passwort").value = "";
+    $("anmeldung").hidden = true;
     await laden();
   } catch (fehler) {
     $("login-fehler").textContent = fehler.message;
@@ -151,9 +178,6 @@ $("abmelden").addEventListener("click", async () => {
   zeigeAnmeldung();
 });
 
-laden().catch((fehler) => {
-  // 401 zeigt bereits die Anmeldung; alles andere (z. B. Server nicht erreichbar) als Meldung.
-  if (!$("anmeldung").hidden) return;
-  $("app").hidden = false;
-  $("meldung").textContent = `Stand konnte nicht geladen werden: ${fehler.message}`;
-});
+window.addEventListener("hashchange", laden);
+// Erst starten, wenn auch markdown.js und blaetter.js geladen sind.
+window.addEventListener("DOMContentLoaded", laden);
