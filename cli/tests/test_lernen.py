@@ -105,3 +105,8 @@ def test_blatt_dateien_nur_aus_dem_quell_repo(tmp_path, monkeypatch):
         lernen.blatt_dateien(sitzung, {"dateien": [{"name": "x.png", "quelle": "../geheim.png"}]})
     with pytest.raises(lernen.Fehler, match="nicht im Quell-Repo"):
         lernen.blatt_dateien(sitzung, {"dateien": [{"name": "x.png", "quelle": "cc/fehlt.png"}]})
+
+
+def test_geaenderte_faecher():
+    dateien = "M\tcc/topics/docker/TOPIC.md\nA\tse/origin-tasks/task-9/TASKS.md\nM\tREADME.md\nR100\tcc/a.md\tbwl/b.md\n"
+    assert lernen.geaenderte_faecher(dateien) == ["bwl", "cc", "se"]

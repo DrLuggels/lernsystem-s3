@@ -51,37 +51,43 @@ def _id(conn: sqlite3.Connection, tabelle: str, spalte: str, wert: str, wofuer: 
     return zeile["id"]
 
 
+def schreiben(conn: sqlite3.Connection, daten: ImportIn) -> dict:
+    """Upsert ohne eigene Transaktion; der Aufrufer führt BEGIN/COMMIT."""
+    for f in daten.faecher:
+        conn.execute(
+            "INSERT INTO faecher(slug, name, about_pfad, about_hash) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(slug) DO UPDATE SET name=excluded.name,"
+            " about_pfad=excluded.about_pfad, about_hash=excluded.about_hash",
+            (f.slug, f.name, f.about_pfad, f.about_hash),
+        )
+    for t in daten.themen:
+        fach_id = _id(conn, "faecher", "slug", t.fach, f"Thema {t.schluessel}")
+        parent_id = None
+        if t.parent is not None:
+            parent_id = _id(conn, "themen", "schluessel", t.parent, f"Thema {t.schluessel}")
+        conn.execute(
+            "INSERT INTO themen(fach_id, parent_id, schluessel, titel, reihenfolge) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(schluessel) DO UPDATE SET fach_id=excluded.fach_id,"
+            " parent_id=excluded.parent_id, titel=excluded.titel, reihenfolge=excluded.reihenfolge",
+            (fach_id, parent_id, t.schluessel, t.titel, t.reihenfolge),
+        )
+    for e in daten.eintraege:
+        thema_id = _id(conn, "themen", "schluessel", e.thema, f"Eintrag {e.schluessel}")
+        conn.execute(
+            "INSERT INTO eintraege(schluessel, thema_id, art, titel, kurztext, quellpfad, anker, quell_hash, punkte)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(schluessel) DO UPDATE SET thema_id=excluded.thema_id, art=excluded.art,"
+            " titel=excluded.titel, kurztext=excluded.kurztext, quellpfad=excluded.quellpfad,"
+            " anker=excluded.anker, quell_hash=excluded.quell_hash, punkte=excluded.punkte",
+            (e.schluessel, thema_id, e.art, e.titel, e.kurztext, e.quellpfad, e.anker, e.quell_hash, e.punkte),
+        )
+    return {"faecher": len(daten.faecher), "themen": len(daten.themen), "eintraege": len(daten.eintraege)}
+
+
 def importieren(conn: sqlite3.Connection, daten: ImportIn) -> dict:
     conn.execute("BEGIN")
     try:
-        for f in daten.faecher:
-            conn.execute(
-                "INSERT INTO faecher(slug, name, about_pfad, about_hash) VALUES (?, ?, ?, ?)"
-                " ON CONFLICT(slug) DO UPDATE SET name=excluded.name,"
-                " about_pfad=excluded.about_pfad, about_hash=excluded.about_hash",
-                (f.slug, f.name, f.about_pfad, f.about_hash),
-            )
-        for t in daten.themen:
-            fach_id = _id(conn, "faecher", "slug", t.fach, f"Thema {t.schluessel}")
-            parent_id = None
-            if t.parent is not None:
-                parent_id = _id(conn, "themen", "schluessel", t.parent, f"Thema {t.schluessel}")
-            conn.execute(
-                "INSERT INTO themen(fach_id, parent_id, schluessel, titel, reihenfolge) VALUES (?, ?, ?, ?, ?)"
-                " ON CONFLICT(schluessel) DO UPDATE SET fach_id=excluded.fach_id,"
-                " parent_id=excluded.parent_id, titel=excluded.titel, reihenfolge=excluded.reihenfolge",
-                (fach_id, parent_id, t.schluessel, t.titel, t.reihenfolge),
-            )
-        for e in daten.eintraege:
-            thema_id = _id(conn, "themen", "schluessel", e.thema, f"Eintrag {e.schluessel}")
-            conn.execute(
-                "INSERT INTO eintraege(schluessel, thema_id, art, titel, kurztext, quellpfad, anker, quell_hash, punkte)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                " ON CONFLICT(schluessel) DO UPDATE SET thema_id=excluded.thema_id, art=excluded.art,"
-                " titel=excluded.titel, kurztext=excluded.kurztext, quellpfad=excluded.quellpfad,"
-                " anker=excluded.anker, quell_hash=excluded.quell_hash, punkte=excluded.punkte",
-                (e.schluessel, thema_id, e.art, e.titel, e.kurztext, e.quellpfad, e.anker, e.quell_hash, e.punkte),
-            )
+        zaehler = schreiben(conn, daten)
         if daten.quell_commit:
             conn.execute(
                 "INSERT INTO meta(schluessel, wert) VALUES ('quell_commit', ?)"
@@ -92,4 +98,4 @@ def importieren(conn: sqlite3.Connection, daten: ImportIn) -> dict:
     except BaseException:
         conn.execute("ROLLBACK")
         raise
-    return {"faecher": len(daten.faecher), "themen": len(daten.themen), "eintraege": len(daten.eintraege)}
+    return zaehler

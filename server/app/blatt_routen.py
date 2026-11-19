@@ -2,15 +2,16 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, Response
 
-from . import auth, blaetter, db
+from . import auth, blaetter, db, updates
 
 router = APIRouter(prefix="/api", dependencies=[Depends(auth.angemeldet)])
 DB = Depends(db.get_db)
 
 
 @router.get("/eintraege")
-def eintraege(fach: str | None = None, thema: str | None = None, conn: sqlite3.Connection = DB):
-    return blaetter.auswahl(conn, fach, thema)
+def eintraege(fach: str | None = None, thema: str | None = None, alle: bool = False,
+              conn: sqlite3.Connection = DB):
+    return blaetter.auswahl(conn, fach, thema, alle)
 
 
 @router.post("/blaetter")
@@ -59,3 +60,28 @@ def datei_hochladen(blatt_id: int, daten: blaetter.DateiIn, conn: sqlite3.Connec
 def datei(blatt_id: int, name: str, conn: sqlite3.Connection = DB):
     mime, inhalt = blaetter.datei_lesen(conn, blatt_id, name)
     return Response(content=inhalt, media_type=mime, headers={"X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/stand")
+def stand(conn: sqlite3.Connection = DB):
+    return updates.stand(conn)
+
+
+@router.get("/updates")
+def update_liste(conn: sqlite3.Connection = DB):
+    return updates.liste(conn)
+
+
+@router.post("/updates")
+def update_starten(daten: updates.UpdateStart, conn: sqlite3.Connection = DB):
+    return updates.starten(conn, daten)
+
+
+@router.post("/updates/{update_id}/anwenden")
+def update_anwenden(update_id: int, daten: updates.UpdateAnwenden, conn: sqlite3.Connection = DB):
+    return updates.anwenden(conn, update_id, daten)
+
+
+@router.post("/updates/{update_id}/fehler")
+def update_fehler(update_id: int, daten: updates.UpdateFehlschlag, conn: sqlite3.Connection = DB):
+    return updates.fehlgeschlagen(conn, update_id, daten)

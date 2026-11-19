@@ -214,6 +214,100 @@ def claude_starten(prompt_datei: str, auftrag: str, werkzeuge: list[str]) -> Non
         raise Fehler(f"Claude wurde mit Fehler {ergebnis.returncode} beendet")
 
 
+# ---------- Quell-Update ----------
+
+def git_quelle(*argumente: str) -> str:
+    return subprocess.run(["git", "-C", str(QUELLE), *argumente],
+                          check=True, capture_output=True, text=True).stdout
+
+
+def geaenderte_faecher(dateien: str) -> list[str]:
+    """Fach-Ordner aus der Ausgabe von `git diff --name-status`."""
+    faecher: set[str] = set()
+    for zeile in dateien.splitlines():
+        for pfad in zeile.split("\t")[1:]:
+            if "/" in pfad:
+                faecher.add(pfad.split("/", 1)[0])
+    return sorted(faecher)
+
+
+def update_pruefen() -> None:
+    """Nach dem Pull: Wenn sich das Quell-Repo geändert hat, das Update im Hintergrund starten."""
+    stand = api("GET", "/api/stand")
+    alt, neu = stand["quell_commit"], quell_commit(QUELLE)
+    if alt is None or alt == neu:
+        return
+    try:
+        update_id = api("POST", "/api/updates", {"commit_von": alt, "commit_bis": neu})["id"]
+    except Fehler as fehler:
+        if "409" in str(fehler):
+            print("Hinweis: Ein Quell-Update läuft bereits im Hintergrund.")
+            return
+        raise
+    ordner = SITZUNGEN / "updates"
+    ordner.mkdir(parents=True, exist_ok=True)
+    with open(ordner / f"update-{update_id}.log", "w", encoding="utf-8") as log:
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "update", "ausfuehren", str(update_id)],
+                         stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+    print(f"Das Quell-Repo hat neue Inhalte ({alt[:7]} → {neu[:7]}). Update {update_id} läuft im Hintergrund;\n"
+          "  ansehen mit „lernen update diff“ und „lernen update log“. Du lernst solange mit dem alten Stand.")
+
+
+def update_ausfuehren(update_id: int) -> None:
+    lauf = next((u for u in api("GET", "/api/updates") if u["id"] == update_id), None)
+    if lauf is None or lauf["status"] != "laeuft":
+        raise Fehler(f"Update {update_id} läuft nicht")
+    bereich = f"{lauf['commit_von']}..{lauf['commit_bis']}"
+    sitzung = SITZUNGEN / "updates" / f"update-{update_id}"
+    sitzung.mkdir(parents=True, exist_ok=True)
+    try:
+        dateien = git_quelle("diff", "--name-status", bereich)
+        (sitzung / "dateien.txt").write_text(dateien, encoding="utf-8")
+        (sitzung / "diff.patch").write_text(
+            git_quelle("diff", bereich, "--", "*.md", ":(exclude)*/origin/*"), encoding="utf-8")
+        vorhandene = {f["slug"] for f in api("GET", "/api/uebersicht")}
+        eintraege = []
+        for fach in geaenderte_faecher(dateien):
+            if fach in vorhandene:
+                eintraege += api("GET", f"/api/eintraege?{urllib.parse.urlencode({'fach': fach, 'alle': 'true'})}")
+        (sitzung / "eintraege.json").write_text(json.dumps(eintraege, ensure_ascii=False, indent=1), encoding="utf-8")
+        (sitzung / "update.json").unlink(missing_ok=True)
+
+        relativ = sitzung.relative_to(WURZEL)
+        claude_starten("UPDATE.md", f"Sitzungsordner: `{relativ}`\nCommits: `{bereich}`",
+                       ["Read", "Glob", "Grep", "Write"])
+        if not (sitzung / "update.json").is_file():
+            raise Fehler("Claude hat kein update.json geschrieben")
+        update = json.loads((sitzung / "update.json").read_text(encoding="utf-8"))
+        update["daten"] = anreichern(update.get("daten") or {}, QUELLE)
+        print(api("POST", f"/api/updates/{update_id}/anwenden", update))
+    except Exception as fehler:
+        api("POST", f"/api/updates/{update_id}/fehler", {"protokoll": f"{type(fehler).__name__}: {fehler}"[:4000]})
+        raise
+
+
+def befehl_update(args: argparse.Namespace) -> None:
+    if args.aktion == "ausfuehren":
+        if args.id is None:
+            raise Fehler("Update-Nummer fehlt")
+        update_ausfuehren(args.id)
+        return
+    updates = api("GET", "/api/updates")
+    if not updates:
+        print("Bisher gab es kein Quell-Update.")
+        return
+    if args.aktion == "diff":
+        lauf = next((u for u in updates if u["id"] == args.id), None) if args.id else updates[0]
+        if lauf is None:
+            raise Fehler(f"Update {args.id} nicht gefunden")
+        subprocess.run(["git", "-C", str(QUELLE), "diff", f"{lauf['commit_von']}..{lauf['commit_bis']}",
+                        "--", ".", ":(exclude)*/origin/*"])
+        return
+    for u in updates[:1] if args.id is None else [x for x in updates if x["id"] == args.id]:
+        print(f"Update {u['id']} · {u['am']} · {(u['commit_von'] or '')[:7]} → {u['commit_bis'][:7]} · {u['status']}")
+        print(f"\n{u['zusammenfassung'] or '(noch keine Zusammenfassung)'}\n\n{u['protokoll'] or ''}")
+
+
 # ---------- Blatt ----------
 
 def blatt_dateien(sitzung: Path, blatt: dict) -> list[tuple[str, Path]]:
@@ -252,6 +346,7 @@ def blatt_hochladen(sitzung: Path, bereich: dict) -> int:
 
 def befehl_blatt(args: argparse.Namespace) -> None:
     quelle_aktualisieren()
+    update_pruefen()
     bereich = bereich_waehlen(" ".join(args.bereich) or None)
     abfrage = urllib.parse.urlencode(
         {"thema": bereich["thema"]} if bereich["thema"] else {"fach": bereich["fach"]})
@@ -373,6 +468,12 @@ def main(argv: list[str] | None = None) -> int:
         p_aktiv.add_argument("id", type=int)
         p_aktiv.add_argument("--thema", action="store_true", help="die Nummer meint ein Thema")
         p_aktiv.set_defaults(funktion=befehl_aktiv)
+
+    p_update = unter.add_parser("update", help="Quell-Updates ansehen")
+    p_update.add_argument("aktion", choices=["diff", "log", "ausfuehren"],
+                          help="diff: Änderungen im Quell-Repo · log: Protokoll · ausfuehren: intern")
+    p_update.add_argument("id", nargs="?", type=int, help="Update-Nummer (Standard: das letzte)")
+    p_update.set_defaults(funktion=befehl_update)
 
     # Ohne Befehl: Blatt erzeugen.
     if argv is None:

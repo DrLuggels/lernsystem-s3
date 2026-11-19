@@ -1,0 +1,9 @@
+complete -c lernen -f
+complete -c lernen -n __fish_use_subcommand -a blatt -d "Thema wählen und Übungsblatt erzeugen"
+complete -c lernen -n __fish_use_subcommand -a korrigieren -d "abgegebenes Blatt korrigieren"
+complete -c lernen -n __fish_use_subcommand -a status -d "Stand je Fach"
+complete -c lernen -n __fish_use_subcommand -a update -d "Quell-Updates ansehen"
+complete -c lernen -n __fish_use_subcommand -a aus -d "Eintrag oder Thema deaktivieren"
+complete -c lernen -n __fish_use_subcommand -a an -d "Eintrag oder Thema aktivieren"
+complete -c lernen -n __fish_use_subcommand -a import -d "Extraktion an den Server schicken"
+complete -c lernen -n "__fish_seen_subcommand_from update" -a "diff log"

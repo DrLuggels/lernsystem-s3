@@ -268,8 +268,15 @@ def datei_lesen(conn: sqlite3.Connection, blatt_id: int, name: str) -> tuple[str
     return zeile["mime"], zeile["inhalt"]
 
 
-def auswahl(conn: sqlite3.Connection, fach: str | None, thema: str | None) -> list[dict]:
-    """Aktive Einträge eines Fachs oder Themas (mit Unterthemen), schwächste zuerst."""
+def auswahl(conn: sqlite3.Connection, fach: str | None, thema: str | None, alle: bool = False) -> list[dict]:
+    """Einträge eines Fachs oder Themas (mit Unterthemen), schwächste zuerst.
+
+    Standard: nur aktive Einträge in aktiven Themen (für Blätter). Mit alle=True auch
+    deaktivierte (für Quell-Updates); archivierte nie.
+    """
+    nur_aktive_themen = "" if alle else "aktiv = 1 AND "
+    nur_aktive_kinder = "" if alle else " WHERE t.aktiv = 1"
+    nur_aktive_eintraege = "" if alle else " AND e.aktiv = 1"
     if thema is not None:
         start, parameter, wofuer = "schluessel = ?", thema, "Thema"
     elif fach is not None:
@@ -282,12 +289,12 @@ def auswahl(conn: sqlite3.Connection, fach: str | None, thema: str | None) -> li
         raise BlattFehler(404, f"{wofuer} '{parameter}' nicht gefunden")
     return [dict(z) for z in conn.execute(
         f"WITH RECURSIVE baum(id) AS ("
-        f"  SELECT id FROM themen WHERE aktiv = 1 AND {start}"
-        f"  UNION ALL SELECT t.id FROM themen t JOIN baum b ON t.parent_id = b.id WHERE t.aktiv = 1)"
-        f" SELECT e.id, e.schluessel, e.art, e.titel, e.kurztext, e.quellpfad, e.anker, e.punkte, e.level,"
+        f"  SELECT id FROM themen WHERE {nur_aktive_themen}{start}"
+        f"  UNION ALL SELECT t.id FROM themen t JOIN baum b ON t.parent_id = b.id{nur_aktive_kinder})"
+        f" SELECT e.id, e.schluessel, e.art, e.titel, e.kurztext, e.quellpfad, e.anker, e.punkte, e.level, e.aktiv,"
         f" e.status, e.bewertet_am, t.schluessel AS thema, t.titel AS thema_titel"
         f" FROM eintraege e JOIN themen t ON t.id = e.thema_id"
-        f" WHERE e.thema_id IN (SELECT id FROM baum) AND e.aktiv = 1 AND e.status != 'archiviert'"
+        f" WHERE e.thema_id IN (SELECT id FROM baum){nur_aktive_eintraege} AND e.status != 'archiviert'"
         f" ORDER BY e.level, e.bewertet_am IS NOT NULL, e.bewertet_am, e.id",
         (parameter,),
     )]
