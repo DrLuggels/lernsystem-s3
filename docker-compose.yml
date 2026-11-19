@@ -1,0 +1,9 @@
+services:
+  lernsystem:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${LERN_PORT:-8099}:8000"
+    volumes:
+      - ./data:/data

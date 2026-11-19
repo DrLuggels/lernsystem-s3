@@ -1,0 +1,7 @@
+.git
+dski-sources-3
+data
+sessions
+server/.venv
+**/__pycache__
+.env
