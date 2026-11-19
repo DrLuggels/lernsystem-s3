@@ -65,7 +65,7 @@ neuen Fach trägst du es unter `daten.faecher` ein.
 
 ## Zum Schluss
 
-Prüfe: gültiges JSON; jeder Schlüssel unter `stark_geaendert` und `archiviert` existiert in
+Ob die Datei gültiges JSON ist, prüft das Skript nach dir. Prüfe selbst: jeder Schlüssel unter `stark_geaendert` und `archiviert` existiert in
 `eintraege.json`; jeder `quellpfad` existiert im Quell-Repo; jede geänderte Markdown-Datei aus
 `dateien.txt` kommt im Protokoll vor (auch mit „keine Auswirkung"). Antworte mit der
 Zusammenfassung.

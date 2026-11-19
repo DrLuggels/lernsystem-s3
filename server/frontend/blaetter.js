@@ -245,3 +245,25 @@ async function zeigeBlatt(blattId) {
   const teile = [kopf, blatt.status === "korrigiert" ? levelAenderungen(blatt.bewertungen) : null, ...aufgaben, fuss];
   $("blatt-inhalt").replaceChildren(...teile.filter(Boolean));
 }
+
+/* ---------- Quell-Updates ---------- */
+
+const UPDATE_TEXT = { laeuft: "läuft", fertig: "eingearbeitet", fehler: "fehlgeschlagen" };
+
+async function zeigeUpdates() {
+  const updates = await api("GET", "/api/updates");
+  const liste = $("update-liste");
+  if (!updates.length) {
+    liste.replaceChildren(el("p", { class: "leer",
+      text: "Bisher gab es kein Quell-Update. Beim Start von „lernen“ wird das Quell-Repo geprüft." }));
+    return;
+  }
+  liste.replaceChildren(...updates.map((u) => el("details", { class: `update update--${u.status}` },
+    el("summary", {},
+      el("span", { class: "blattzeile__titel", text: u.zusammenfassung || "Update ohne Zusammenfassung" }),
+      el("span", { class: "eintrag__meta" },
+        el("span", { class: `marke marke--update-${u.status}`, text: UPDATE_TEXT[u.status] }),
+        el("span", { text: datum(u.am) }),
+        el("span", { text: `${(u.commit_von || "").slice(0, 7)} → ${u.commit_bis.slice(0, 7)}` }))),
+    el("pre", { class: "protokoll", text: u.protokoll || "Kein Protokoll." }))));
+}

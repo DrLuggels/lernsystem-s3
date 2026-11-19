@@ -107,6 +107,6 @@ Behebe jede Beanstandung und prüfe die geänderten Aufgaben erneut.
 
 ## Zum Schluss
 
-Prüfe, dass `blatt.json` gültiges JSON ist, jede Aufgabe mindestens einen `schluessel` aus dem
+Ob `blatt.json` gültiges JSON ist, prüft das Skript nach dir. Prüfe selbst, dass jede Aufgabe mindestens einen `schluessel` aus dem
 Auftrag nennt und die Nummern fortlaufend sind. Antworte mit einer Zeile je Aufgabe: Nummer,
 Format, Punkte, Thema.

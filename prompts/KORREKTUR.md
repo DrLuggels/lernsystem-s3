@@ -63,5 +63,6 @@ Eine `pdf`-Aufgabe ohne `abgabe/ausgefuellt.pdf` oder ohne erkennbare Bearbeitun
 }
 ```
 
-Jede Aufgabe des Blatts kommt genau einmal vor. Prüfe am Ende, dass die Datei gültiges JSON
-ist. Antworte mit einer Zeile je Aufgabe: Nummer, Punkte, Wert, ein Satz Begründung.
+Jede Aufgabe des Blatts kommt genau einmal vor. Ob die Datei gültiges JSON ist, prüft das
+Skript nach dir; achte auf maskierte Anführungszeichen und Zeilenumbrüche in den Texten.
+Antworte mit einer Zeile je Aufgabe: Nummer, Punkte, Wert, ein Satz Begründung.

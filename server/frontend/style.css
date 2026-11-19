@@ -210,3 +210,13 @@ a.leise { color: var(--grau); font-size: .9rem; text-underline-offset: 3px; }
   .sicherheit span { grid-column: 1 / -1; }
   .aufgabe { padding: 16px 14px; }
 }
+
+/* Quell-Updates */
+.update { background: var(--karte); border: 1px solid var(--linie); border-left: 4px solid var(--gruen); border-radius: 6px; box-shadow: var(--schatten); }
+.update--laeuft { border-left-color: var(--gelb); }
+.update--fehler { border-left-color: var(--rot); }
+.update > summary { display: grid; gap: 8px; padding: 16px 20px; }
+.update .blattzeile__titel { font: 400 1rem/1.5 var(--sans); }
+.update .eintrag__meta { grid-column: 1; }
+.marke--update-fertig { color: var(--gruen); } .marke--update-laeuft { color: var(--gelb); } .marke--update-fehler { color: var(--rot); }
+.protokoll { margin: 0; padding: 14px 20px 18px; border-top: 1px dashed var(--linie); font: 400 .78rem/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--grau); }

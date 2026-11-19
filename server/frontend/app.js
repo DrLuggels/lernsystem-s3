@@ -133,11 +133,14 @@ async function zeigeUebersicht() {
 /** Zeigt die Ansicht zur Adresse: #/ , #/blaetter , #/blatt/<id> */
 async function laden() {
   const [, name = "", id] = location.hash.split("/");
-  const ansicht = name === "blatt" ? "blatt" : name === "blaetter" ? "blaetter" : "uebersicht";
+  const ansicht = ["blatt", "blaetter", "updates"].includes(name) ? name : "uebersicht";
   $("meldung").textContent = "";
   try {
     if (ansicht === "uebersicht") await zeigeUebersicht();
-    else await Promise.all([kopfzahlen(), ansicht === "blatt" ? zeigeBlatt(Number(id)) : zeigeBlaetter()]);
+    else {
+      const zeigen = { blatt: () => zeigeBlatt(Number(id)), blaetter: zeigeBlaetter, updates: zeigeUpdates };
+      await Promise.all([kopfzahlen(), zeigen[ansicht]()]);
+    }
   } catch (fehler) {
     if (!$("anmeldung").hidden) return;       // 401: die Anmeldung ist schon sichtbar
     $("meldung").textContent = fehler.message;
@@ -145,7 +148,7 @@ async function laden() {
   if (!$("anmeldung").hidden && $("app").hidden) return;
   $("anmeldung").hidden = true;
   $("app").hidden = false;
-  for (const bereich of ["uebersicht", "blaetter", "blatt"]) {
+  for (const bereich of ["uebersicht", "blaetter", "blatt", "updates"]) {
     $(`ansicht-${bereich}`).hidden = bereich !== ansicht;
   }
   for (const reiter of document.querySelectorAll(".reiter a")) {

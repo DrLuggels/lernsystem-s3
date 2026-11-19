@@ -486,6 +486,9 @@ def main(argv: list[str] | None = None) -> int:
     except Fehler as fehler:
         print(f"Fehler: {fehler}", file=sys.stderr)
         return 1
+    except json.JSONDecodeError as fehler:
+        print(f"Fehler: Eine von Claude geschriebene Datei ist kein gültiges JSON ({fehler})", file=sys.stderr)
+        return 1
     return 0
 
 
