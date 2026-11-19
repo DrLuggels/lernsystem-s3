@@ -110,3 +110,43 @@ def test_blatt_dateien_nur_aus_dem_quell_repo(tmp_path, monkeypatch):
 def test_geaenderte_faecher():
     dateien = "M\tcc/topics/docker/TOPIC.md\nA\tse/origin-tasks/task-9/TASKS.md\nM\tREADME.md\nR100\tcc/a.md\tbwl/b.md\n"
     assert lernen.geaenderte_faecher(dateien) == ["bwl", "cc", "se"]
+
+
+def test_auswahl_erst_fach_dann_grosses_thema(monkeypatch, capsys):
+    zwei_themen = [dict(FAECHER[1], themen=FAECHER[1]["themen"] + [
+        {"schluessel": "cloud-computing/topics/k8s", "titel": "Kubernetes", "aktiv": True, "gesamt": 4,
+         "beherrscht": 0, "themen": []}], gesamt=9)]
+    monkeypatch.setattr(lernen, "api", lambda *a, **k: zwei_themen)
+    eingaben = iter(["x", "1", "2"])           # ungültig, dann Fach 1, dann Thema 2
+    monkeypatch.setattr("builtins.input", lambda _: next(eingaben))
+    assert lernen.bereich_waehlen(None)["name"] == "Kubernetes"
+    ausgabe = capsys.readouterr().out
+    assert "Grundlagen" not in ausgabe         # Unterthemen stehen nicht im Menü
+    assert "alles aus Cloud Computing" in ausgabe
+
+    eingaben = iter(["1", "0"])
+    assert lernen.bereich_waehlen(None)["thema"] is None
+
+
+def test_fach_mit_einem_thema_fragt_nicht_weiter(monkeypatch):
+    monkeypatch.setattr(lernen, "api", lambda *a, **k: FAECHER)
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    assert lernen.bereich_waehlen(None)["name"] == "Cloud Computing"
+
+
+def test_hochladen_nur_einmal(tmp_path, monkeypatch):
+    sitzungen = tmp_path / "sessions"
+    sitzung = sitzungen / "neu-1"
+    sitzung.mkdir(parents=True)
+    (sitzung / "blatt.json").write_text('{"titel": "T", "aufgaben": []}')
+    (sitzung / "auftrag.json").write_text('{"fach": "cc", "thema": "cc/docker"}')
+    monkeypatch.setattr(lernen, "SITZUNGEN", sitzungen)
+    monkeypatch.setattr(lernen, "konfiguration", lambda: ("http://x", "t"))
+    aufrufe = []
+    monkeypatch.setattr(lernen, "blatt_hochladen", lambda s, b: aufrufe.append(b) or 7)
+
+    assert lernen.sitzung_hochladen(sitzung, still=True) == 7
+    assert aufrufe == [{"fach": "cc", "thema": "cc/docker"}]
+    assert not sitzung.exists() and (sitzungen / "blatt-7" / "blatt_id").read_text() == "7"
+    with pytest.raises(lernen.Fehler, match="schon hochgeladen"):
+        lernen.sitzung_hochladen(sitzungen / "blatt-7", still=True)

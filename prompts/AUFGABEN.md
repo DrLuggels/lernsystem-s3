@@ -1,7 +1,9 @@
 # Übungsblatt erzeugen
 
-Du erzeugst ein Übungsblatt für das Lernsystem. Der Sitzungsordner steht im Auftrag am Ende
-dieses Textes. Arbeite ohne Rückfragen.
+Du erzeugst ein Übungsblatt für das Lernsystem. Der Sitzungsordner und der Befehl zum
+Hochladen stehen im Auftrag am Ende dieses Textes. Beginne sofort und arbeite ohne Rückfragen.
+Der Lernende sieht dir im Chat zu: Sag in einem kurzen Satz, was du gerade tust (Auswahl,
+Aufgaben, Gegenprüfung, Hochladen). Verrate dabei keine Lösungen.
 
 ## Regeln
 
@@ -107,6 +109,9 @@ Behebe jede Beanstandung und prüfe die geänderten Aufgaben erneut.
 
 ## Zum Schluss
 
-Ob `blatt.json` gültiges JSON ist, prüft das Skript nach dir. Prüfe selbst, dass jede Aufgabe mindestens einen `schluessel` aus dem
-Auftrag nennt und die Nummern fortlaufend sind. Antworte mit einer Zeile je Aufgabe: Nummer,
-Format, Punkte, Thema.
+Ob `blatt.json` gültiges JSON ist, prüft das Skript. Prüfe selbst, dass jede Aufgabe mindestens
+einen `schluessel` aus dem Auftrag nennt und die Nummern fortlaufend sind.
+
+Lade das Blatt dann mit dem Befehl aus dem Auftrag hoch. Meldet er einen Fehler, behebe die
+Ursache in `blatt.json` und versuche es erneut. Nenne zum Schluss die Adresse des Blatts und je
+Aufgabe eine Zeile: Nummer, Format, Punkte, Thema (ohne Lösung).

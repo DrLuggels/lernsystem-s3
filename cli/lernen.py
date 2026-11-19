@@ -176,15 +176,35 @@ def bereich_finden(liste: list[dict], suche: str) -> dict:
     return treffer[0]
 
 
+def nummer_waehlen(frage: str, zeilen: list[str], mit_null: str | None = None) -> int:
+    """Zeigt ein kurzes Menü und liefert die gewählte Nummer (0 nur, wenn mit_null gesetzt ist)."""
+    print()
+    if mit_null:
+        print(f"  0  {mit_null}")
+    for nummer, zeile in enumerate(zeilen, 1):
+        print(f"{nummer:>3}  {zeile}")
+    while True:
+        eingabe = input(f"\n{frage} ").strip()
+        if eingabe.isdigit() and (0 if mit_null else 1) <= int(eingabe) <= len(zeilen):
+            return int(eingabe)
+        print("Bitte eine der Nummern eingeben.")
+
+
 def bereich_waehlen(suche: str | None) -> dict:
+    """Ohne Suchwort: erst das Fach, dann eines seiner großen Themen (oder das ganze Fach)."""
     liste = bereiche(api("GET", "/api/uebersicht"))
     if not liste:
         raise Fehler("Es gibt noch keine aktiven Einträge")
     if suche:
         return bereich_finden(liste, suche)
-    for nummer, b in enumerate(liste, 1):
-        print(f"{nummer:>3}  {'  ' * b['tiefe']}{b['name']}  ({b['beherrscht']}/{b['gesamt']})")
-    return bereich_finden(liste, input("\nWas möchtest du lernen? Nummer oder Name: ").strip())
+    zeile = lambda b: f"{b['name']}  ({b['beherrscht']}/{b['gesamt']} beherrscht)"
+    faecher = [b for b in liste if b["tiefe"] == 0]
+    fach = faecher[nummer_waehlen("Welches Fach?", [zeile(b) for b in faecher]) - 1]
+    themen = [b for b in liste if b["tiefe"] == 1 and b["fach"] == fach["fach"]]
+    if len(themen) < 2:
+        return fach
+    wahl = nummer_waehlen("Welches Thema?", [zeile(b) for b in themen], mit_null=f"alles aus {fach['name']}")
+    return fach if wahl == 0 else themen[wahl - 1]
 
 
 # ---------- Quell-Repo und Claude ----------
@@ -203,14 +223,18 @@ def quelle_unveraendert() -> None:
         raise Fehler("Im Quell-Repo wurden Dateien verändert. Das darf nicht passieren, bitte prüfen:\n" + status)
 
 
-def claude_starten(prompt_datei: str, auftrag: str, werkzeuge: list[str]) -> None:
+def claude_starten(prompt_datei: str, auftrag: str, werkzeuge: list[str], live: bool = False) -> None:
+    """Startet Claude mit einem Prompt aus prompts/.
+
+    live=True öffnet den Chat im Terminal: man sieht Claude arbeiten und kann eingreifen.
+    Sonst läuft Claude ohne Chat durch (für Korrektur und Hintergrund-Updates).
+    """
     prompt = (PROMPTS / prompt_datei).read_text(encoding="utf-8") + "\n\n## Auftrag\n\n" + auftrag
+    befehl = ["claude", prompt] if live else ["claude", "-p", prompt]
     ergebnis = subprocess.run(
-        ["claude", "-p", prompt, "--permission-mode", "acceptEdits", "--allowedTools", *werkzeuge],
-        cwd=WURZEL,
-    )
+        [*befehl, "--permission-mode", "acceptEdits", "--allowedTools", *werkzeuge], cwd=WURZEL)
     quelle_unveraendert()
-    if ergebnis.returncode != 0:
+    if ergebnis.returncode != 0 and not live:
         raise Fehler(f"Claude wurde mit Fehler {ergebnis.returncode} beendet")
 
 
@@ -344,6 +368,40 @@ def blatt_hochladen(sitzung: Path, bereich: dict) -> int:
     return blatt_id
 
 
+def sitzung_hochladen(sitzung: Path, still: bool = False) -> int:
+    """Schickt das Blatt einer Sitzung an den Server und benennt den Ordner in blatt-<id> um."""
+    if not (sitzung / "blatt.json").is_file():
+        raise Fehler(f"In {sitzung} liegt kein blatt.json")
+    if (sitzung / "blatt_id").is_file():
+        raise Fehler(f"Dieses Blatt ist schon hochgeladen (Blatt {(sitzung / 'blatt_id').read_text().strip()})")
+    auftrag = json.loads((sitzung / "auftrag.json").read_text(encoding="utf-8"))
+    blatt_id = blatt_hochladen(sitzung, {"fach": auftrag["fach"], "thema": auftrag.get("thema")})
+    (sitzung / "blatt_id").write_text(str(blatt_id), encoding="utf-8")
+    ziel = SITZUNGEN / f"blatt-{blatt_id}"
+    sitzung.rename(ziel)
+    url, _ = konfiguration()
+    adresse = f"{url}/#/blatt/{blatt_id}"
+    print(f"Blatt {blatt_id} liegt bereit: {adresse}")
+    if not still and shutil.which("xdg-open"):
+        subprocess.Popen(["xdg-open", adresse], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    if (ziel / "blatt.pdf").is_file():
+        (ziel / "abgabe").mkdir(exist_ok=True)
+        print(f"PDF-Teil: {ziel / 'blatt.pdf'}\n"
+              f"  In Xournal++ ausfüllen und als {ziel / 'abgabe' / 'blatt.xopp'} speichern.")
+        if shutil.which("xournalpp") and not still:
+            subprocess.Popen(["xournalpp", str(ziel / "blatt.pdf")],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return blatt_id
+
+
+def befehl_hochladen(args: argparse.Namespace) -> None:
+    sitzung = (WURZEL / args.sitzung).resolve()
+    if not sitzung.is_relative_to(SITZUNGEN.resolve()) or not sitzung.is_dir():
+        raise Fehler(f"'{args.sitzung}' ist kein Sitzungsordner unter sessions/")
+    sitzung_hochladen(sitzung, args.still)
+
+
 def befehl_blatt(args: argparse.Namespace) -> None:
     quelle_aktualisieren()
     update_pruefen()
@@ -357,28 +415,25 @@ def befehl_blatt(args: argparse.Namespace) -> None:
     sitzung = SITZUNGEN / f"neu-{time.strftime('%Y%m%d-%H%M%S')}"
     (sitzung / ".loesung").mkdir(parents=True)
     (sitzung / "auftrag.json").write_text(json.dumps({
-        "bereich": bereich["name"], "fach": bereich["fach"], "anzahl": args.anzahl, "eintraege": eintraege,
+        "bereich": bereich["name"], "fach": bereich["fach"], "thema": bereich["thema"],
+        "anzahl": args.anzahl, "eintraege": eintraege,
     }, ensure_ascii=False, indent=1), encoding="utf-8")
 
     relativ = sitzung.relative_to(WURZEL)
-    print(f"Erzeuge Blatt zu „{bereich['name']}“ ({len(eintraege)} Einträge zur Auswahl) …")
-    claude_starten("AUFGABEN.md", f"Sitzungsordner: `{relativ}`",
-                   ["Read", "Glob", "Grep", "Write", "Edit", "Agent", "Bash(pdflatex:*)"])
-    if not (sitzung / "blatt.json").is_file():
-        raise Fehler(f"Claude hat kein blatt.json geschrieben (siehe {relativ})")
+    hochladen = f"python3 cli/lernen.py hochladen {relativ}" + (" --still" if args.still else "")
+    print(f"\nClaude erstellt jetzt das Blatt zu „{bereich['name']}“ ({len(eintraege)} Einträge zur Auswahl).\n"
+          "Der Chat öffnet sich; du kannst zusehen und eingreifen. Beenden mit /exit.\n")
+    claude_starten(
+        "AUFGABEN.md", f"Sitzungsordner: `{relativ}`\nBefehl zum Hochladen: `{hochladen}`",
+        ["Read", "Glob", "Grep", "Write", "Edit", "Agent", "Bash(pdflatex:*)",
+         "Bash(python3 cli/lernen.py hochladen:*)"],
+        live=not args.ohne_chat)
 
-    blatt_id = blatt_hochladen(sitzung, bereich)
-    ziel = SITZUNGEN / f"blatt-{blatt_id}"
-    sitzung.rename(ziel)
-    url, _ = konfiguration()
-    print(f"\nBlatt {blatt_id} liegt bereit: {url}/#/blatt/{blatt_id}")
-    if (ziel / "blatt.pdf").is_file():
-        (ziel / "abgabe").mkdir(exist_ok=True)
-        print(f"PDF-Teil: {ziel / 'blatt.pdf'}\n"
-              f"  In Xournal++ ausfüllen und als {ziel / 'abgabe' / 'blatt.xopp'} speichern.")
-        if shutil.which("xournalpp") and not args.still:
-            subprocess.Popen(["xournalpp", str(ziel / "blatt.pdf")],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    # Hat Claude das Blatt nicht selbst hochgeladen, holt das Skript es nach.
+    if sitzung.is_dir():
+        if not (sitzung / "blatt.json").is_file():
+            raise Fehler(f"Es ist kein Blatt entstanden (Sitzung: {relativ})")
+        sitzung_hochladen(sitzung, args.still)
 
 
 # ---------- Korrektur ----------
@@ -455,8 +510,14 @@ def main(argv: list[str] | None = None) -> int:
     p_blatt = unter.add_parser("blatt", help="Thema wählen und Übungsblatt erzeugen")
     p_blatt.add_argument("bereich", nargs="*", help="Fach oder Thema (Name, Teil davon oder Nummer)")
     p_blatt.add_argument("--anzahl", type=int, default=8, help="Zahl der Aufgaben (Standard: 8)")
-    p_blatt.add_argument("--still", action="store_true", help="Xournal++ nicht öffnen")
+    p_blatt.add_argument("--still", action="store_true", help="Browser und Xournal++ nicht öffnen")
+    p_blatt.add_argument("--ohne-chat", action="store_true", help="Claude ohne Live-Chat durchlaufen lassen")
     p_blatt.set_defaults(funktion=befehl_blatt)
+
+    p_hoch = unter.add_parser("hochladen", help="fertiges Blatt einer Sitzung an den Server schicken")
+    p_hoch.add_argument("sitzung", help="Sitzungsordner, z. B. sessions/neu-20261119-101500")
+    p_hoch.add_argument("--still", action="store_true", help="Browser und Xournal++ nicht öffnen")
+    p_hoch.set_defaults(funktion=befehl_hochladen)
 
     p_korr = unter.add_parser("korrigieren", help="abgegebenes Blatt korrigieren")
     p_korr.add_argument("blatt", nargs="?", type=int, help="Blatt-Nummer (Standard: ältestes abgegebenes)")
